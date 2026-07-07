@@ -1,0 +1,82 @@
+name: Deploy GovPress AI Demo
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy-worker:
+    name: Build Frontend + Deploy Worker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: "10"
+
+      - name: Install worker dependencies
+        working-directory: cloudflare-worker
+        run: pnpm install --frozen-lockfile
+
+      - name: Deploy Cloudflare Worker
+        working-directory: cloudflare-worker
+        run: pnpm dlx wrangler@latest deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: "4543f50f1421947e6f192cb3b2d1d1eb"
+
+      - name: Set MINIMAX_API_KEY secret on worker
+        run: |
+          echo "${{ secrets.MINIMAX_API_KEY }}" | \
+          pnpm dlx wrangler@latest secret put MINIMAX_API_KEY \
+            --name govpress-ai-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: "4543f50f1421947e6f192cb3b2d1d1eb"
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend
+        working-directory: frontend
+        run: pnpm run build
+        env:
+          NODE_ENV: production
+          BASE_PATH: /govpress-ai-demo/
+          VITE_WORKER_URL: https://govpress-ai-worker.4543f50f1421947e6f192cb3b2d1d1eb.workers.dev
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: frontend/dist/public
+
+  deploy-pages:
+    name: Deploy to GitHub Pages
+    needs: build-and-deploy-worker
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
