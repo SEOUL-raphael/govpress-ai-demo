@@ -18,6 +18,8 @@ jobs:
   build-and-deploy-worker:
     name: Build Frontend + Deploy Worker
     runs-on: ubuntu-latest
+    outputs:
+      worker_url: ${{ steps.get_worker_url.outputs.url }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,27 +36,40 @@ jobs:
 
       - name: Install worker dependencies
         working-directory: cloudflare-worker
-        run: pnpm install --frozen-lockfile
+        run: pnpm install
 
       - name: Deploy Cloudflare Worker
+        id: deploy_worker
         working-directory: cloudflare-worker
-        run: pnpm dlx wrangler@latest deploy
+        run: |
+          pnpm dlx wrangler@latest deploy 2>&1 | tee /tmp/wrangler_output.txt
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: "4543f50f1421947e6f192cb3b2d1d1eb"
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      - name: Extract Worker URL
+        id: get_worker_url
+        run: |
+          URL=$(grep -oP 'https://govpress-ai-worker\.[^.]+\.workers\.dev' /tmp/wrangler_output.txt | head -1)
+          if [ -z "$URL" ]; then
+            URL="https://govpress-ai-worker.${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.workers.dev"
+          fi
+          echo "url=$URL" >> $GITHUB_OUTPUT
+          echo "Worker URL: $URL"
 
       - name: Set MINIMAX_API_KEY secret on worker
+        working-directory: cloudflare-worker
         run: |
           echo "${{ secrets.MINIMAX_API_KEY }}" | \
           pnpm dlx wrangler@latest secret put MINIMAX_API_KEY \
             --name govpress-ai-worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: "4543f50f1421947e6f192cb3b2d1d1eb"
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Install frontend dependencies
         working-directory: frontend
-        run: pnpm install --frozen-lockfile
+        run: pnpm install
 
       - name: Build frontend
         working-directory: frontend
@@ -62,7 +77,7 @@ jobs:
         env:
           NODE_ENV: production
           BASE_PATH: /govpress-ai-demo/
-          VITE_WORKER_URL: https://govpress-ai-worker.4543f50f1421947e6f192cb3b2d1d1eb.workers.dev
+          VITE_WORKER_URL: ${{ steps.get_worker_url.outputs.url }}
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
