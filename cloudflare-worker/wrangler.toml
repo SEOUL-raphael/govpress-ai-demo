@@ -1,0 +1,8 @@
+name = "govpress-ai-worker"
+main = "src/index.ts"
+compatibility_date = "2025-04-30"
+compatibility_flags = ["nodejs_compat"]
+account_id = "4543f50f1421947e6f192cb3b2d1d1eb"
+
+[vars]
+ALLOWED_ORIGIN = "https://seoul-raphael.github.io"
